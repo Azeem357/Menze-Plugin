@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -37,9 +38,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # third-party apps
+    'rest_framework',        # Django REST Framework
+    'corsheaders',
+    # our apps
+    'menz_plugin',
+    'analytics',
+    'campaigns',
+    'suggestions',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -70,14 +80,38 @@ WSGI_APPLICATION = 'menz_plugin.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'menz_plugin_db',
+        'USER': 'postgres',
+        'PASSWORD': os.getenv('DB_PASSWORD', 'Azeem?369'),
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
 }
+
+# ── CORS SETTINGS ───────────────────────────────
+# Allow your React store to call this API
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",   # React store
+    "http://localhost:5173",   # Vite React store
+]
+
+CORS_ALLOW_ALL_ORIGINS = True  # For development only
+
+# ── REST FRAMEWORK ──────────────────────────────
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+}
+
 
 
 # Password validation
@@ -114,7 +148,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
+# ── STATIC FILES ────────────────────────────────
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
 # Email
@@ -125,3 +161,12 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# ── SECRET KEY ──────────────────────────────────
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-menz-plugin-secret-key-2024'
+)
+
+DEBUG = True
+ALLOWED_HOSTS = ['*']
