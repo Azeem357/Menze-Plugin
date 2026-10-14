@@ -87,7 +87,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'menz_plugin_db',
         'USER': 'postgres',
-        'PASSWORD': os.getenv('DB_PASSWORD', 'Azeem?369'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'azeem123'),
         'HOST': 'localhost',
         'PORT': '5432',
     }
