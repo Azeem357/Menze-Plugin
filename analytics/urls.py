@@ -35,6 +35,11 @@ urlpatterns = [
         views.MetricDetailView.as_view(),
         name='metric-detail'
     ),
+    path(
+        'predictions/',
+        views.PredictionsView.as_view(),
+        name='predictions'
+    ),
     
     # Dashboard
     path(

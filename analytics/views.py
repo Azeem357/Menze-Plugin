@@ -107,6 +107,110 @@ class MetricDetailView(generics.RetrieveAPIView):
     serializer_class = AnalyticsMetricSerializer
 
 
+class PredictionsView(APIView):
+    """
+    GET /api/predictions/?horizon=7
+    Returns a transparent historical-average revenue baseline.
+    """
+    def get(self, request):
+        try:
+            horizon = int(request.query_params.get('horizon', 7))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'horizon must be a positive integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if horizon < 1:
+            return Response(
+                {'error': 'horizon must be a positive integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        today = date.today()
+        start_date = today - timedelta(days=30)
+        records = list(
+            AnalyticsMetric.objects.filter(
+                metric_date__gte=start_date,
+                metric_date__lte=today
+            ).order_by('metric_date').values(
+                'metric_date', 'total_revenue'
+            )
+        )
+
+        if not records:
+            return Response({
+                'model': {
+                    'status': 'offline',
+                    'title': 'Forecast unavailable',
+                    'message': 'No historical revenue metrics are available yet.'
+                },
+                'weekly': {
+                    'label': f'Next {horizon} Days Forecast',
+                    'title': 'Expected Revenue',
+                    'value': None
+                },
+                'monthly': {
+                    'label': 'Monthly Outlook',
+                    'title': 'Total Expected Revenue',
+                    'value': None,
+                    'volatility_label': 'Unavailable'
+                },
+                'history': [],
+                'insights': []
+            })
+
+        revenues = [float(record['total_revenue'] or 0) for record in records]
+        average = sum(revenues) / len(revenues)
+        variance = sum((revenue - average) ** 2 for revenue in revenues) / len(revenues)
+        standard_deviation = variance ** 0.5
+        volatility_ratio = standard_deviation / average if average else 0
+        volatility = (
+            'high' if volatility_ratio >= 0.3
+            else 'medium' if volatility_ratio >= 0.15
+            else 'low'
+        )
+
+        history = []
+        for index, record in enumerate(records):
+            if index == 0:
+                continue
+            prior_revenues = revenues[max(0, index - 7):index]
+            predicted = sum(prior_revenues) / len(prior_revenues)
+            actual = revenues[index]
+            history.append({
+                'period': record['metric_date'].isoformat(),
+                'predicted': round(predicted, 2),
+                'actual': round(actual, 2),
+                'variance': round((actual - predicted) / predicted * 100, 2)
+                if predicted else None
+            })
+
+        return Response({
+            'model': {
+                'status': 'active',
+                'title': 'Historical Trend Forecast',
+                'message': (
+                    f'Baseline estimates use the average of {len(records)} '
+                    'recorded daily revenue metrics; no trained ML model is configured.'
+                )
+            },
+            'weekly': {
+                'label': f'Next {horizon} Days Forecast',
+                'title': 'Expected Revenue',
+                'value': round(average * horizon, 2),
+                'note': 'Baseline estimate from recorded daily revenue.'
+            },
+            'monthly': {
+                'label': 'Monthly Outlook',
+                'title': 'Total Expected Revenue',
+                'value': round(average * 30, 2),
+                'volatility': volatility
+            },
+            'history': history,
+            'insights': []
+        })
+
+
 # ══════════════════════════════════════════════
 # WEBHOOK VIEW
 # (Custom logic — APIView is correct here)
