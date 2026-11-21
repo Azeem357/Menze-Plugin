@@ -51,8 +51,6 @@
     trackProductView: function(productId, productName, price) {
     sendEvent('product_view', { product_id: productId, product_name: productName, price: price });
   },
-    trackPurchase: function(orderId, total, items) {
-  sendEvent('checkout_complete', { order_id: orderId, total: total, items: items });
-},
+    
   };
 })();

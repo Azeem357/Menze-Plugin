@@ -4,16 +4,17 @@ import uuid
 class SessionEvent(models.Model):
     
     EVENT_TYPES = [
-        ('page_view', 'Page View'),
-        ('product_view', 'Product View'),
-        ('add_to_cart', 'Add to Cart'),
-        ('checkout_start', 'Checkout Start'),
-        ('checkout_complete', 'Checkout Complete'),
-        ('login', 'Login'),
-        ('register', 'Register'),
-        ('wishlist_add', 'Wishlist Add'),
-    ]
-    
+    ('page_view', 'Page View'),
+    ('product_view', 'Product View'),
+    ('add_to_cart', 'Add to Cart'),
+    ('checkout_start', 'Checkout Start'),
+    ('checkout_complete', 'Checkout Complete'),
+    ('checkout', 'Checkout'),
+    ('purchase', 'Purchase'),
+    ('login', 'Login'),
+    ('register', 'Register'),
+    ('wishlist_add', 'Wishlist Add'),
+]
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
