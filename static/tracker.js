@@ -1,5 +1,5 @@
 (function () {
-  const PLUGIN_BACKEND = 'http://localhost:8000'; // change to live URL later
+  const PLUGIN_BACKEND = 'https://menze-plugin.onrender.com'; // change to live URL later
   const STORE_ID = 'menz-store'; // unique ID for your store
 
   // Generate or get session ID
