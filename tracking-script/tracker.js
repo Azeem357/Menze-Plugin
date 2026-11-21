@@ -45,21 +45,14 @@
         price: price,
       });
     },
-    trackCheckout: function (orderId, total) {
-      sendEvent('checkout', {
-        order_id: orderId,
-        total: total,
-      });
-    },
+    trackCheckout: function(orderId, total) {
+  sendEvent('checkout_start', { order_id: orderId, total: total });
+},
     trackProductView: function(productId, productName, price) {
     sendEvent('product_view', { product_id: productId, product_name: productName, price: price });
   },
-    trackPurchase: function (orderId, total, items) {
-      sendEvent('purchase', {
-        order_id: orderId,
-        total: total,
-        items: items,
-      });
-    },
+    trackPurchase: function(orderId, total, items) {
+  sendEvent('checkout_complete', { order_id: orderId, total: total, items: items });
+},
   };
 })();
