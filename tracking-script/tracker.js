@@ -51,6 +51,9 @@
         total: total,
       });
     },
+    trackProductView: function(productId, productName, price) {
+    sendEvent('product_view', { product_id: productId, product_name: productName, price: price });
+  },
     trackPurchase: function (orderId, total, items) {
       sendEvent('purchase', {
         order_id: orderId,
