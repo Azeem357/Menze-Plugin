@@ -4,12 +4,12 @@ from . import views
 urlpatterns = [
     # Event tracking
     path(
-        'events/capture',
+        'events/capture/',
         views.CaptureEventView.as_view(),
         name='capture-event'
     ),
     path(
-        'events/order-complete',
+        'events/order-complete/',
         views.OrderWebhookView.as_view(),
         name='order-webhook'
     ),
@@ -43,17 +43,17 @@ urlpatterns = [
     
     # Dashboard
     path(
-        'dashboard/overview',
+        'dashboard/overview/',
         views.DashboardOverviewView.as_view(),
         name='dashboard-overview'
     ),
     path(
-        'dashboard/funnel',
+        'dashboard/funnel/',
         views.FunnelView.as_view(),
         name='funnel'
     ),
     path(
-        'dashboard/calculate',
+        'dashboard/calculate/',
         views.CalculateMetricsView.as_view(),
         name='calculate-metrics'
     ),
