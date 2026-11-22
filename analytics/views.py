@@ -533,7 +533,6 @@ class SyncOrdersView(APIView):
                     SessionEvent.objects.create(
                         event_type='purchase',
                         session_id=f"order-{order['order_id']}",
-                        store_id='menz-store',
                         order_id=str(order['order_id']),
                         revenue=float(order['total']),
                     )
