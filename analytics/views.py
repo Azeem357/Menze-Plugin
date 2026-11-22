@@ -517,20 +517,26 @@ class ServeTrackerView(APIView):
 class SyncOrdersView(APIView):
     def post(self, request):
         import requests as req
-        url = 'https://menze-store-backend-1.onrender.com/api/orders/sync/'
-        response = req.get(url)
-        orders = response.json()
-        count = 0
-        for order in orders:
-            obj, created = SessionEvent.objects.get_or_create(
-                event_type='purchase',
-                data__order_id=order['order_id'],
-                defaults={
-                    'session_id': f"order-{order['order_id']}",
-                    'store_id': 'menz-store',
-                    'data': order,
-                }
-            )
-            if created:
-                count += 1
-        return Response({'synced': count})
+        try:
+            url = 'https://menze-store-backend-1.onrender.com/api/orders/sync/'
+            response = req.get(url)
+            
+            # Check if request was successful
+            if response.status_code != 200:
+                return Response({
+                    'error': f'MENZ store returned {response.status_code}',
+                    'body': response.text[:500]
+                }, status=500)
+            
+            orders = response.json()
+            
+            # Debug: show what we received
+            return Response({
+                'status_code': response.status_code,
+                'type': str(type(orders)),
+                'count': len(orders) if isinstance(orders, list) else 'not a list',
+                'sample': orders[:2] if isinstance(orders, list) else orders
+            })
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
