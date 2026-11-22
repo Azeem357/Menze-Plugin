@@ -514,3 +514,23 @@ class ServeTrackerView(APIView):
             open(tracker_path, 'rb'),
             content_type='application/javascript'
         )
+class SyncOrdersView(APIView):
+    def post(self, request):
+        import requests as req
+        url = 'https://menze-store-backend-1.onrender.com/api/orders/sync/'
+        response = req.get(url)
+        orders = response.json()
+        count = 0
+        for order in orders:
+            obj, created = SessionEvent.objects.get_or_create(
+                event_type='purchase',
+                data__order_id=order['order_id'],
+                defaults={
+                    'session_id': f"order-{order['order_id']}",
+                    'store_id': 'menz-store',
+                    'data': order,
+                }
+            )
+            if created:
+                count += 1
+        return Response({'synced': count})
