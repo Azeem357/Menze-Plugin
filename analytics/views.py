@@ -540,3 +540,8 @@ class SyncOrdersView(APIView):
             
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+def post(self, request):
+        calculator = MetricCalculator()
+        results = calculator.calculate_all_historical()
+        return Response({'success': True, 'days_calculated': len(results)})       
+    

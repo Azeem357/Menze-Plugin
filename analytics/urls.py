@@ -57,5 +57,10 @@ urlpatterns = [
         views.CalculateMetricsView.as_view(),
         name='calculate-metrics'
     ),
+    path(
+        'dashboard/calculate-all/',
+        views.CalculateAllMetricsView.as_view(),
+        name='calculate-all-metrics'
+    ),
     path('sync/orders/', views.SyncOrdersView.as_view(), name='sync-orders'),
 ]
