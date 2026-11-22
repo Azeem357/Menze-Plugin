@@ -25,7 +25,9 @@ class MetricCalculator:
         orders_count = purchase_events.count()
         
         # Read total from data field (synced orders) or revenue field
-        total_revenue = 0
+        total_revenue = sum(
+    float(e.revenue) for e in purchase_events if e.revenue
+)
         for e in purchase_events:
             if e.data and 'total' in e.data:
                 try:
@@ -93,36 +95,23 @@ class MetricCalculator:
         purchase_events = SessionEvent.objects.filter(
             event_type__in=['purchase', 'checkout_complete']
         )
-        
+
         if not purchase_events.exists():
             return 0
-        
+
         user_orders = {}
         for event in purchase_events:
-            uid = event.session_id  # use session_id if no user_id
+            uid = event.session_id
             if uid not in user_orders:
                 user_orders[uid] = []
-            revenue = 0
-            if event.data and 'total' in event.data:
-                try:
-                    revenue = float(event.data['total'])
-                except (ValueError, TypeError):
-                    pass
-            elif hasattr(event, 'revenue') and event.revenue:
-                revenue = float(event.revenue)
+            revenue = float(event.revenue) if event.revenue else 0
             user_orders[uid].append(revenue)
-        
-        qualifying = {
-            uid: orders
-            for uid, orders in user_orders.items()
-            if len(orders) >= 1
-        }
-        
-        if not qualifying:
+
+        all_revenues = [r for orders in user_orders.values() for r in orders]
+        if not all_revenues:
             return 0
-        
-        all_revenues = [r for orders in qualifying.values() for r in orders]
-        avg_order_value = sum(all_revenues) / len(all_revenues) if all_revenues else 0
-        avg_orders = sum(len(o) for o in qualifying.values()) / len(qualifying)
-        
+
+        avg_order_value = sum(all_revenues) / len(all_revenues)
+        avg_orders = sum(len(o) for o in user_orders.values()) / len(user_orders)
+
         return round(avg_order_value * avg_orders, 2)

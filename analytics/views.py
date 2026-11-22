@@ -520,24 +520,25 @@ class SyncOrdersView(APIView):
         try:
             url = 'https://menze-store-backend-1.onrender.com/api/orders/sync/'
             response = req.get(url)
-            
-            # Check if request was successful
             if response.status_code != 200:
-                return Response({
-                    'error': f'MENZ store returned {response.status_code}',
-                    'body': response.text[:500]
-                }, status=500)
-            
+                return Response({'error': f'MENZ store returned {response.status_code}'}, status=500)
             orders = response.json()
-            
-            # Debug: show what we received
-            return Response({
-                'status_code': response.status_code,
-                'type': str(type(orders)),
-                'count': len(orders) if isinstance(orders, list) else 'not a list',
-                'sample': orders[:2] if isinstance(orders, list) else orders
-            })
-            
+            count = 0
+            for order in orders:
+                existing = SessionEvent.objects.filter(
+                    event_type='purchase',
+                    order_id=str(order['order_id'])
+                ).exists()
+                if not existing:
+                    SessionEvent.objects.create(
+                        event_type='purchase',
+                        session_id=f"order-{order['order_id']}",
+                        store_id='menz-store',
+                        order_id=str(order['order_id']),
+                        revenue=float(order['total']),
+                    )
+                    count += 1
+            return Response({'synced': count, 'total': len(orders)})
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 class CalculateAllMetricsView(APIView):
