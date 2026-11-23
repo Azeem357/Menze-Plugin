@@ -1,8 +1,11 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
+
 from .models import AnalyticsMetric, SessionEvent
 
 
@@ -94,3 +97,66 @@ class SyncOrdersViewTests(TestCase):
             SessionEvent.objects.filter(event_type='purchase').count(),
             2,
         )
+
+
+class CalculateAllMetricsViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_calculates_six_months_with_bounded_database_queries(self):
+        target_date = date.today() - timedelta(days=1)
+        occurred_at = datetime.combine(
+            target_date,
+            time(12),
+            tzinfo=timezone.utc,
+        )
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='session-1',
+            order_id='order-1',
+            revenue=100,
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='checkout_complete',
+            session_id='session-2',
+            order_id='order-2',
+            revenue=50,
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='page_view',
+            session_id='session-1',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='register',
+            session_id='session-3',
+            user_id='customer-1',
+            occurred_at=occurred_at,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(
+                '/api/dashboard/calculate-all/',
+                data={},
+                format='json',
+                HTTP_ORIGIN='https://menze-plugin-frontend.vercel.app',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {
+            'success': True,
+            'days_calculated': 180,
+        })
+        self.assertEqual(
+            response['Access-Control-Allow-Origin'],
+            '*',
+        )
+        self.assertLessEqual(len(queries), 10)
+
+        metric = AnalyticsMetric.objects.get(metric_date=target_date)
+        self.assertEqual(metric.total_sessions, 3)
+        self.assertEqual(metric.orders_count, 2)
+        self.assertEqual(metric.total_revenue, 150)
+        self.assertEqual(metric.ltv, 75)

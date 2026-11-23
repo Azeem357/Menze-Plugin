@@ -1,6 +1,12 @@
+from datetime import date, timedelta
+
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncDate
+from django.utils import timezone
+
 from .models import SessionEvent, AnalyticsMetric
 from campaigns.models import AdCampaign
-from datetime import date
+
 
 class MetricCalculator:
     
@@ -22,20 +28,12 @@ class MetricCalculator:
         purchase_events = events.filter(
             event_type__in=['purchase', 'checkout_complete']
         )
-        orders_count = purchase_events.count()
-        
-        # Read total from data field (synced orders) or revenue field
-        total_revenue = sum(
-    float(e.revenue) for e in purchase_events if e.revenue
-)
-        for e in purchase_events:
-            if e.data and 'total' in e.data:
-                try:
-                    total_revenue += float(e.data['total'])
-                except (ValueError, TypeError):
-                    pass
-            elif hasattr(e, 'revenue') and e.revenue:
-                total_revenue += float(e.revenue)
+        purchase_totals = purchase_events.aggregate(
+            orders_count=Count('id'),
+            total_revenue=Sum('revenue'),
+        )
+        orders_count = purchase_totals['orders_count']
+        total_revenue = float(purchase_totals['total_revenue'] or 0)
         
         conversion_rate = (
             (orders_count / total_sessions * 100)
@@ -83,35 +81,165 @@ class MetricCalculator:
     
     def calculate_all_historical(self):
         """Calculate metrics for all past 6 months"""
-        from datetime import timedelta
+        today = date.today()
+        start_date = today - timedelta(days=180)
+        end_date = today - timedelta(days=1)
+
+        daily_stats = {
+            entry['metric_date']: entry
+            for entry in (
+                SessionEvent.objects.filter(
+                    occurred_at__date__gte=start_date,
+                    occurred_at__date__lte=end_date,
+                )
+                .annotate(metric_date=TruncDate('occurred_at'))
+                .values('metric_date')
+                .annotate(
+                    total_sessions=Count('session_id', distinct=True),
+                    page_views=Count(
+                        'id', filter=Q(event_type='page_view')
+                    ),
+                    product_views=Count(
+                        'id', filter=Q(event_type='product_view')
+                    ),
+                    add_to_cart=Count(
+                        'id', filter=Q(event_type='add_to_cart')
+                    ),
+                    checkout_starts=Count(
+                        'id', filter=Q(event_type='checkout_start')
+                    ),
+                    orders_count=Count(
+                        'id',
+                        filter=Q(
+                            event_type__in=[
+                                'purchase',
+                                'checkout_complete',
+                            ]
+                        ),
+                    ),
+                    total_revenue=Sum(
+                        'revenue',
+                        filter=Q(
+                            event_type__in=[
+                                'purchase',
+                                'checkout_complete',
+                            ]
+                        ),
+                    ),
+                    new_customers=Count(
+                        'user_id',
+                        filter=Q(event_type='register'),
+                        distinct=True,
+                    ),
+                )
+            )
+        }
+        total_spend = (
+            AdCampaign.objects.filter(is_active=True).aggregate(
+                total=Sum('spend')
+            )['total']
+            or 0
+        )
+        ltv = self.calculate_ltv()
+        existing_metrics = {
+            metric.metric_date: metric
+            for metric in AnalyticsMetric.objects.filter(
+                metric_date__gte=start_date,
+                metric_date__lte=end_date,
+            )
+        }
+
         results = []
+        to_create = []
+        to_update = []
+        updated_at = timezone.now()
+        metric_fields = [
+            'total_sessions',
+            'page_views',
+            'product_views',
+            'add_to_cart_count',
+            'checkout_starts',
+            'orders_count',
+            'total_revenue',
+            'conversion_rate',
+            'roas',
+            'cac',
+            'ltv',
+            'updated_at',
+        ]
+
         for days_ago in range(180, 0, -1):
-            d = date.today() - timedelta(days=days_ago)
-            result = self.calculate_daily_metrics(target_date=d)
-            results.append(result)
+            target_date = today - timedelta(days=days_ago)
+            stats = daily_stats.get(target_date, {})
+            total_sessions = stats.get('total_sessions', 0)
+            orders_count = stats.get('orders_count', 0)
+            total_revenue = float(stats.get('total_revenue') or 0)
+            new_customers = stats.get('new_customers', 0)
+            roas = total_revenue / total_spend if total_spend > 0 else 0
+            cac = total_spend / new_customers if new_customers > 0 else 0
+            defaults = {
+                'total_sessions': total_sessions,
+                'page_views': stats.get('page_views', 0),
+                'product_views': stats.get('product_views', 0),
+                'add_to_cart_count': stats.get('add_to_cart', 0),
+                'checkout_starts': stats.get('checkout_starts', 0),
+                'orders_count': orders_count,
+                'total_revenue': round(total_revenue, 2),
+                'conversion_rate': round(
+                    orders_count / total_sessions * 100
+                    if total_sessions > 0 else 0,
+                    2,
+                ),
+                'roas': round(roas, 2),
+                'cac': round(cac, 2),
+                'ltv': round(ltv, 2),
+                'updated_at': updated_at,
+            }
+
+            metric = existing_metrics.get(target_date)
+            if metric is None:
+                to_create.append(
+                    AnalyticsMetric(metric_date=target_date, **defaults)
+                )
+                created = True
+            else:
+                for field, value in defaults.items():
+                    setattr(metric, field, value)
+                to_update.append(metric)
+                created = False
+
+            results.append({
+                'date': str(target_date),
+                'sessions': total_sessions,
+                'orders': orders_count,
+                'revenue': total_revenue,
+                'roas': roas,
+                'cac': cac,
+                'ltv': ltv,
+                'created': created,
+            })
+
+        AnalyticsMetric.objects.bulk_create(to_create, batch_size=50)
+        AnalyticsMetric.objects.bulk_update(
+            to_update,
+            fields=metric_fields,
+            batch_size=50,
+        )
         return results
     
     def calculate_ltv(self):
         purchase_events = SessionEvent.objects.filter(
             event_type__in=['purchase', 'checkout_complete']
         )
-
-        if not purchase_events.exists():
+        totals = purchase_events.aggregate(
+            total_revenue=Sum('revenue'),
+            customer_count=Count('session_id', distinct=True),
+        )
+        customer_count = totals['customer_count']
+        if not customer_count:
             return 0
 
-        user_orders = {}
-        for event in purchase_events:
-            uid = event.session_id
-            if uid not in user_orders:
-                user_orders[uid] = []
-            revenue = float(event.revenue) if event.revenue else 0
-            user_orders[uid].append(revenue)
-
-        all_revenues = [r for orders in user_orders.values() for r in orders]
-        if not all_revenues:
-            return 0
-
-        avg_order_value = sum(all_revenues) / len(all_revenues)
-        avg_orders = sum(len(o) for o in user_orders.values()) / len(user_orders)
-
-        return round(avg_order_value * avg_orders, 2)
+        return round(
+            float(totals['total_revenue'] or 0) / customer_count,
+            2,
+        )
