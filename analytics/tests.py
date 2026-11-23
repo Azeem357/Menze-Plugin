@@ -9,6 +9,36 @@ from rest_framework.test import APIClient
 from .models import AnalyticsMetric, SessionEvent
 
 
+class EventCaptureViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_saves_client_event_timestamp_and_attribution(self):
+        occurred_at = datetime.combine(
+            date.today() - timedelta(days=1),
+            time(12),
+            tzinfo=timezone.utc,
+        )
+
+        response = self.client.post(
+            '/api/events/capture/',
+            data={
+                'event_type': 'register',
+                'session_id': 'session-1',
+                'user_id': 'customer-1',
+                'utm_source': 'newsletter',
+                'occurred_at': occurred_at.isoformat(),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        event = SessionEvent.objects.get()
+        self.assertEqual(event.user_id, 'customer-1')
+        self.assertEqual(event.utm_source, 'newsletter')
+        self.assertEqual(event.occurred_at, occurred_at)
+
+
 class PredictionsViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -156,7 +186,7 @@ class CalculateAllMetricsViewTests(TestCase):
         self.assertLessEqual(len(queries), 10)
 
         metric = AnalyticsMetric.objects.get(metric_date=target_date)
-        self.assertEqual(metric.total_sessions, 3)
+        self.assertEqual(metric.total_sessions, 2)
         self.assertEqual(metric.orders_count, 2)
         self.assertEqual(metric.total_revenue, 150)
         self.assertEqual(metric.ltv, 75)

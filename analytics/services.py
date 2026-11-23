@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import TruncDate
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
 from .models import SessionEvent, AnalyticsMetric
@@ -18,7 +18,12 @@ class MetricCalculator:
             occurred_at__date=target_date
         )
         
-        total_sessions = events.values('session_id').distinct().count()
+        visitor_events = events.exclude(
+            event_type__in=['purchase', 'checkout_complete']
+        )
+        total_sessions = visitor_events.values(
+            'session_id'
+        ).distinct().count()
         page_views = events.filter(event_type='page_view').count()
         product_views = events.filter(event_type='product_view').count()
         add_to_cart = events.filter(event_type='add_to_cart').count()
@@ -95,7 +100,16 @@ class MetricCalculator:
                 .annotate(metric_date=TruncDate('occurred_at'))
                 .values('metric_date')
                 .annotate(
-                    total_sessions=Count('session_id', distinct=True),
+                    total_sessions=Count(
+                        'session_id',
+                        distinct=True,
+                        filter=~Q(
+                            event_type__in=[
+                                'purchase',
+                                'checkout_complete',
+                            ]
+                        ),
+                    ),
                     page_views=Count(
                         'id', filter=Q(event_type='page_view')
                     ),
@@ -233,7 +247,10 @@ class MetricCalculator:
         )
         totals = purchase_events.aggregate(
             total_revenue=Sum('revenue'),
-            customer_count=Count('session_id', distinct=True),
+            customer_count=Count(
+                Coalesce('user_id', 'session_id'),
+                distinct=True,
+            ),
         )
         customer_count = totals['customer_count']
         if not customer_count:

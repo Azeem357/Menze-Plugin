@@ -14,7 +14,7 @@ class SessionEventCreateSerializer(serializers.ModelSerializer):
             'page_url', 'product_id', 'utm_source',
             'utm_medium', 'utm_campaign', 'referrer',
             'device_type', 'time_on_page', 'revenue',
-            'order_id', 'campaign_id'
+            'order_id', 'campaign_id', 'occurred_at'
         ]
 
 class AnalyticsMetricSerializer(serializers.ModelSerializer):

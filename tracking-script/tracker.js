@@ -1,6 +1,5 @@
 (function () {
-  const PLUGIN_BACKEND = 'https://menze-plugin.onrender.com'; // change to live URL later
-  const STORE_ID = 'menz-store'; // unique ID for your store
+  const PLUGIN_BACKEND = 'https://menze-plugin.onrender.com';
 
   // Generate or get session ID
   function getSessionId() {
@@ -12,16 +11,31 @@
     return sid;
   }
 
+  function getAttribution() {
+    const params = new URLSearchParams(window.location.search);
+    const fields = ['utm_source', 'utm_medium', 'utm_campaign'];
+
+    fields.forEach((field) => {
+      const value = params.get(field);
+      if (value) sessionStorage.setItem(`menze_${field}`, value);
+    });
+
+    return fields.reduce((attribution, field) => {
+      attribution[field] = sessionStorage.getItem(`menze_${field}`) || '';
+      return attribution;
+    }, {});
+  }
+
   // Send event to plugin backend
   function sendEvent(eventType, data = {}) {
     const payload = {
-      store_id: STORE_ID,
       session_id: getSessionId(),
       event_type: eventType,
       page_url: window.location.href,
       referrer: document.referrer || '',
-      user_agent: navigator.userAgent,
-      timestamp: new Date().toISOString(),
+      device_type: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+      occurred_at: new Date().toISOString(),
+      ...getAttribution(),
       ...data,
     };
 
@@ -30,7 +44,9 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       keepalive: true,
-    }).catch(() => {}); // silent fail
+    }).catch((error) => {
+      console.warn('Menze analytics event could not be sent.', error);
+    });
   }
 
   // Track page view on load
@@ -38,19 +54,26 @@
 
   // Expose global tracker for manual events
   window.MenzeTracker = {
-    trackAddToCart: function (productId, productName, price) {
-      sendEvent('add_to_cart', {
-        product_id: productId,
-        product_name: productName,
-        price: price,
+    trackAddToCart: function (productId) {
+      sendEvent('add_to_cart', { product_id: productId });
+    },
+    trackCheckout: function () {
+      sendEvent('checkout_start');
+    },
+    trackProductView: function (productId) {
+      sendEvent('product_view', { product_id: productId });
+    },
+    trackPurchase: function (orderId, total, userId) {
+      sendEvent('purchase', {
+        order_id: String(orderId),
+        revenue: total,
+        user_id: userId == null ? getSessionId() : String(userId),
       });
     },
-    trackCheckout: function(orderId, total) {
-  sendEvent('checkout_start', { order_id: orderId, total: total });
-},
-    trackProductView: function(productId, productName, price) {
-    sendEvent('product_view', { product_id: productId, product_name: productName, price: price });
-  },
-    
+    trackRegistration: function (userId) {
+      sendEvent('register', {
+        user_id: userId == null ? getSessionId() : String(userId),
+      });
+    },
   };
 })();
