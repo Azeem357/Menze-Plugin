@@ -99,7 +99,7 @@ class SessionEvent(models.Model):
     )
     
     # When
-    occurred_at = models.DateTimeField(auto_now_add=False, default=None, null=True, blank=True)
+    occurred_at = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         db_table = 'session_events'
@@ -139,7 +139,7 @@ class AnalyticsMetric(models.Model):
     cac = models.FloatField(default=0.0)
     ltv = models.FloatField(default=0.0)
     
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=False, default=None, null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
