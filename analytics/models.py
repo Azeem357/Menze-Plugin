@@ -99,7 +99,7 @@ class SessionEvent(models.Model):
     )
     
     # When
-    occurred_at = models.DateTimeField(auto_now_add=True)
+    occurred_at = models.DateTimeField(auto_now_add=False, default=None, null=True, blank=True)
     
     class Meta:
         db_table = 'session_events'
