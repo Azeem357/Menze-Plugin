@@ -1,8 +1,9 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from rest_framework.test import APIClient
-from .models import AnalyticsMetric
+from .models import AnalyticsMetric, SessionEvent
 
 
 class PredictionsViewTests(TestCase):
@@ -40,3 +41,56 @@ class PredictionsViewTests(TestCase):
         response = self.client.get('/api/predictions/?horizon=0')
 
         self.assertEqual(response.status_code, 400)
+
+
+class SyncOrdersViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @patch('requests.get')
+    def test_syncs_new_orders_without_duplicates_and_returns_cors_header(
+        self, get
+    ):
+        orders = [
+            {
+                'order_id': 1,
+                'total': '15.00',
+                'created_at': '2026-11-22T13:57:26.321171+00:00',
+            },
+            {
+                'order_id': 2,
+                'total': '25.00',
+                'created_at': '2026-11-22T13:57:53.013006+00:00',
+            },
+            {
+                'order_id': 2,
+                'total': '25.00',
+                'created_at': '2026-11-22T13:57:53.013006+00:00',
+            },
+        ]
+        get.return_value.status_code = 200
+        get.return_value.json.return_value = orders
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='order-1',
+            order_id='1',
+            revenue=15.00,
+        )
+
+        response = self.client.post(
+            '/api/sync/orders/',
+            data={},
+            format='json',
+            HTTP_ORIGIN='https://menze-plugin-frontend.vercel.app',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'synced': 1, 'total': 3})
+        self.assertEqual(
+            response['Access-Control-Allow-Origin'],
+            '*',
+        )
+        self.assertEqual(
+            SessionEvent.objects.filter(event_type='purchase').count(),
+            2,
+        )

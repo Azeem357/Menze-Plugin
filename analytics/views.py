@@ -527,23 +527,34 @@ class SyncOrdersView(APIView):
             orders = response.json()
             count = 0
             
-            # Process in batches to avoid timeout
             batch_size = 50
             for i in range(0, len(orders), batch_size):
                 batch = orders[i:i+batch_size]
-                for order in batch:
-                    if not SessionEvent.objects.filter(
+                order_ids = {str(order['order_id']) for order in batch}
+                existing_order_ids = set(
+                    SessionEvent.objects.filter(
                         event_type='purchase',
-                        order_id=str(order['order_id'])
-                    ).exists():
-                        SessionEvent.objects.create(
-                            event_type='purchase',
-                            session_id=f"order-{order['order_id']}",
-                            order_id=str(order['order_id']),
-                            revenue=float(order['total']),
-                            occurred_at=parse_datetime(order['created_at']),
+                        order_id__in=order_ids
+                    ).values_list('order_id', flat=True)
+                )
+                new_events = []
+                for order in batch:
+                    order_id = str(order['order_id'])
+                    if order_id not in existing_order_ids:
+                        new_events.append(
+                            SessionEvent(
+                                event_type='purchase',
+                                session_id=f"order-{order_id}",
+                                order_id=order_id,
+                                revenue=float(order['total']),
+                                occurred_at=parse_datetime(
+                                    order['created_at']
+                                ),
+                            )
                         )
-                        count += 1
+                        existing_order_ids.add(order_id)
+                SessionEvent.objects.bulk_create(new_events)
+                count += len(new_events)
             
             return Response({'synced': count, 'total': len(orders)})
         except req.exceptions.Timeout:
