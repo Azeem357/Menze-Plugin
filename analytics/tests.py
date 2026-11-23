@@ -76,6 +76,35 @@ class PredictionsViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class FunnelViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_counts_purchase_and_checkout_complete_events(self):
+        occurred_at = datetime.now(timezone.utc)
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='session-1',
+            order_id='order-1',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='checkout_complete',
+            session_id='session-2',
+            order_id='order-2',
+            occurred_at=occurred_at,
+        )
+
+        response = self.client.get('/api/dashboard/funnel/')
+
+        self.assertEqual(response.status_code, 200)
+        purchase_stage = next(
+            stage for stage in response.data['funnel']
+            if stage['stage'] == 'Purchase Completed'
+        )
+        self.assertEqual(purchase_stage['count'], 2)
+
+
 class SyncOrdersViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()

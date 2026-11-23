@@ -419,7 +419,9 @@ class FunnelView(APIView):
         product_views   = count_event('product_view')
         add_to_cart     = count_event('add_to_cart')
         checkout_starts = count_event('checkout_start')
-        purchases       = count_event('checkout_complete')
+        purchases = events.filter(
+            event_type__in=['purchase', 'checkout_complete']
+        ).count()
         
         return Response({
             'funnel': [
