@@ -44,6 +44,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       keepalive: true,
+    }).then((response) => {
+      if (!response.ok) {
+        console.warn(
+          `Menze analytics event was rejected (${response.status}).`
+        );
+      }
     }).catch((error) => {
       console.warn('Menze analytics event could not be sent.', error);
     });

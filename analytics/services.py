@@ -4,8 +4,8 @@ from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
-from .models import SessionEvent, AnalyticsMetric
-from campaigns.models import AdCampaign
+from .models import AnalyticsMetric, SessionEvent
+from campaigns.models import CampaignDailyStat
 
 
 class MetricCalculator:
@@ -45,13 +45,23 @@ class MetricCalculator:
             if total_sessions > 0 else 0
         )
         
-        campaigns = AdCampaign.objects.filter(is_active=True)
-        total_spend = sum(c.spend for c in campaigns)
+        total_spend = (
+            CampaignDailyStat.objects.filter(
+                stat_date=target_date
+            ).aggregate(total=Sum('spend'))['total']
+            or 0
+        )
+        total_spend = float(total_spend)
         roas = (total_revenue / total_spend if total_spend > 0 else 0)
         
         new_customers = events.filter(
             event_type='register'
-        ).values('user_id').distinct().count()
+        ).aggregate(
+            total=Count(
+                Coalesce('user_id', 'session_id'),
+                distinct=True,
+            )
+        )['total']
         cac = (total_spend / new_customers if new_customers > 0 else 0)
         
         ltv = self.calculate_ltv()
@@ -141,18 +151,21 @@ class MetricCalculator:
                         ),
                     ),
                     new_customers=Count(
-                        'user_id',
+                        Coalesce('user_id', 'session_id'),
                         filter=Q(event_type='register'),
                         distinct=True,
                     ),
                 )
             )
         }
-        total_spend = (
-            AdCampaign.objects.filter(is_active=True).aggregate(
-                total=Sum('spend')
-            )['total']
-            or 0
+        daily_spend = dict(
+            CampaignDailyStat.objects.filter(
+                stat_date__gte=start_date,
+                stat_date__lte=end_date,
+            )
+            .values('stat_date')
+            .annotate(total_spend=Sum('spend'))
+            .values_list('stat_date', 'total_spend')
         )
         ltv = self.calculate_ltv()
         existing_metrics = {
@@ -189,6 +202,7 @@ class MetricCalculator:
             orders_count = stats.get('orders_count', 0)
             total_revenue = float(stats.get('total_revenue') or 0)
             new_customers = stats.get('new_customers', 0)
+            total_spend = float(daily_spend.get(target_date) or 0)
             roas = total_revenue / total_spend if total_spend > 0 else 0
             cac = total_spend / new_customers if new_customers > 0 else 0
             defaults = {

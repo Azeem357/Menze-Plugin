@@ -6,7 +6,9 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
+from campaigns.models import AdCampaign, CampaignDailyStat
 from .models import AnalyticsMetric, SessionEvent
+from .services import MetricCalculator
 
 
 class EventCaptureViewTests(TestCase):
@@ -37,6 +39,50 @@ class EventCaptureViewTests(TestCase):
         self.assertEqual(event.user_id, 'customer-1')
         self.assertEqual(event.utm_source, 'newsletter')
         self.assertEqual(event.occurred_at, occurred_at)
+
+
+class OrderWebhookViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.campaign = AdCampaign.objects.create(
+            platform='facebook',
+            campaign_name='Winter sale',
+            utm_source='facebook',
+            utm_medium='paid_social',
+            utm_campaign='winter-sale',
+        )
+
+    def test_order_webhook_sets_timestamp_campaign_and_is_idempotent(self):
+        data = {
+            'order_id': 'webhook-order',
+            'total_amount': 75,
+            'user_id': 'customer-1',
+            'utm_source': 'facebook',
+            'utm_medium': 'paid_social',
+            'utm_campaign': 'winter-sale',
+        }
+
+        first = self.client.post(
+            '/api/events/order-complete/',
+            data=data,
+            format='json',
+        )
+        self.assertEqual(first.status_code, 201)
+        first_event = SessionEvent.objects.get()
+        occurred_at = first_event.occurred_at
+        self.assertIsNotNone(occurred_at)
+
+        duplicate = self.client.post(
+            '/api/events/order-complete/',
+            data=data,
+            format='json',
+        )
+
+        self.assertEqual(duplicate.status_code, 201)
+        self.assertEqual(SessionEvent.objects.count(), 1)
+        event = SessionEvent.objects.get()
+        self.assertEqual(event.occurred_at, occurred_at)
+        self.assertEqual(event.ad_campaign, self.campaign)
 
 
 class PredictionsViewTests(TestCase):
@@ -219,3 +265,44 @@ class CalculateAllMetricsViewTests(TestCase):
         self.assertEqual(metric.orders_count, 2)
         self.assertEqual(metric.total_revenue, 150)
         self.assertEqual(metric.ltv, 75)
+
+
+class DailyMetricCampaignSpendTests(TestCase):
+    def test_daily_roas_and_cac_use_spend_for_that_date(self):
+        target_date = date.today() - timedelta(days=1)
+        occurred_at = datetime.combine(
+            target_date,
+            time(12),
+            tzinfo=timezone.utc,
+        )
+        campaign = AdCampaign.objects.create(
+            platform='facebook',
+            campaign_name='Winter sale',
+            utm_source='facebook',
+            utm_medium='paid_social',
+            utm_campaign='winter-sale',
+        )
+        CampaignDailyStat.objects.create(
+            campaign=campaign,
+            stat_date=target_date,
+            spend='100.00',
+        )
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='session-1',
+            user_id='customer-1',
+            order_id='order-1',
+            revenue=250,
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='register',
+            session_id='session-1',
+            user_id='customer-1',
+            occurred_at=occurred_at,
+        )
+
+        result = MetricCalculator().calculate_daily_metrics(target_date)
+
+        self.assertEqual(result['roas'], 2.5)
+        self.assertEqual(result['cac'], 100.0)

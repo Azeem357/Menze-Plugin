@@ -10,6 +10,7 @@ from .serializers import (
     AnalyticsMetricSerializer
 )
 from .services import MetricCalculator
+from .serializers import SessionEventCreateSerializer
 from django.utils.dateparse import parse_datetime
 
 
@@ -240,19 +241,29 @@ class OrderWebhookView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Create the checkout_complete event
-        event = SessionEvent.objects.create(
-            user_id=data.get('user_id'),
-            session_id=data.get(
-                'session_id', 'webhook_session'
+        event_data = {
+            'session_id': (
+                data.get('session_id') or f"order-{data['order_id']}"
             ),
-            event_type='checkout_complete',
-            revenue=data.get('total_amount'),
-            order_id=data.get('order_id'),
-            utm_source=data.get('utm_source'),
-            utm_medium=data.get('utm_medium'),
-            utm_campaign=data.get('utm_campaign')
-        )
+            'event_type': 'checkout_complete',
+            'revenue': data.get('total_amount'),
+            'order_id': data.get('order_id'),
+        }
+        for field in (
+            'user_id',
+            'utm_source',
+            'utm_medium',
+            'utm_campaign',
+            'campaign_id',
+        ):
+            if data.get(field) is not None:
+                event_data[field] = data[field]
+        occurred_at = data.get('occurred_at')
+        if occurred_at:
+            event_data['occurred_at'] = occurred_at
+        serializer = SessionEventCreateSerializer(data=event_data)
+        serializer.is_valid(raise_exception=True)
+        event = serializer.save()
         
         return Response({
             'success': True,
@@ -529,34 +540,46 @@ class SyncOrdersView(APIView):
             orders = response.json()
             count = 0
             
-            batch_size = 50
-            for i in range(0, len(orders), batch_size):
-                batch = orders[i:i+batch_size]
-                order_ids = {str(order['order_id']) for order in batch}
-                existing_order_ids = set(
-                    SessionEvent.objects.filter(
-                        event_type='purchase',
-                        order_id__in=order_ids
-                    ).values_list('order_id', flat=True)
-                )
-                new_events = []
-                for order in batch:
-                    order_id = str(order['order_id'])
-                    if order_id not in existing_order_ids:
-                        new_events.append(
-                            SessionEvent(
-                                event_type='purchase',
-                                session_id=f"order-{order_id}",
-                                order_id=order_id,
-                                revenue=float(order['total']),
-                                occurred_at=parse_datetime(
-                                    order['created_at']
-                                ),
-                            )
-                        )
-                        existing_order_ids.add(order_id)
-                SessionEvent.objects.bulk_create(new_events)
-                count += len(new_events)
+            order_ids = {
+                str(order['order_id'])
+                for order in orders
+            }
+            existing_order_ids = set(
+                SessionEvent.objects.filter(
+                    event_type__in=['purchase', 'checkout_complete'],
+                    order_id__in=order_ids,
+                ).values_list('order_id', flat=True)
+            )
+            for order in orders:
+                order_id = str(order['order_id'])
+                if order_id in existing_order_ids:
+                    continue
+                event_data = {
+                    'session_id': f"order-{order_id}",
+                    'event_type': 'purchase',
+                    'order_id': order_id,
+                    'revenue': order['total'],
+                }
+                for field in (
+                    'user_id',
+                    'customer_id',
+                    'utm_source',
+                    'utm_medium',
+                    'utm_campaign',
+                    'campaign_id',
+                ):
+                    if order.get(field) is not None:
+                        event_data[
+                            'user_id' if field == 'customer_id' else field
+                        ] = order[field]
+                occurred_at = parse_datetime(order.get('created_at', ''))
+                if occurred_at is not None:
+                    event_data['occurred_at'] = occurred_at
+                serializer = SessionEventCreateSerializer(data=event_data)
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                existing_order_ids.add(order_id)
+                count += 1
             
             return Response({'synced': count, 'total': len(orders)})
         except req.exceptions.Timeout:

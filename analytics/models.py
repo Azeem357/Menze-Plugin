@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 import uuid
 
 class SessionEvent(models.Model):
@@ -82,7 +83,7 @@ class SessionEvent(models.Model):
         blank=True
     )
     
-    # Revenue (only for checkout_complete)
+    # Revenue for completed purchase events
     revenue = models.FloatField(
         null=True,
         blank=True
@@ -97,9 +98,21 @@ class SessionEvent(models.Model):
         null=True,
         blank=True
     )
+    ad_campaign = models.ForeignKey(
+        'campaigns.AdCampaign',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='campaign_events',
+        db_column='ad_campaign_id',
+    )
     
     # When
-    occurred_at = models.DateTimeField(null=True, blank=True)
+    occurred_at = models.DateTimeField(
+        default=timezone.now,
+        null=True,
+        blank=True,
+    )
     
     class Meta:
         db_table = 'session_events'
@@ -107,6 +120,25 @@ class SessionEvent(models.Model):
     
     def __str__(self):
         return f"{self.event_type} - {self.session_id}"
+
+
+class CustomerAcquisition(models.Model):
+    customer_key = models.CharField(max_length=205, unique=True)
+    campaign = models.ForeignKey(
+        'campaigns.AdCampaign',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='customer_acquisitions',
+    )
+    acquired_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'customer_acquisitions'
+        ordering = ['acquired_at']
+
+    def __str__(self):
+        return self.customer_key
 
 
 class AnalyticsMetric(models.Model):

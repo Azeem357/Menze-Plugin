@@ -17,4 +17,9 @@ urlpatterns = [
         views.CampaignUpdateSpendView.as_view(),
         name='campaign-update-spend'
     ),
+    path(
+        'campaigns/performance/',
+        views.CampaignPerformanceView.as_view(),
+        name='campaign-performance',
+    ),
 ]
