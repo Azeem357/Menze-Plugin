@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from .models import AISuggestion
 from .serializers import AISuggestionSerializer
+from .services import refresh_rule_suggestions
 
 
 class SuggestionListView(generics.ListAPIView):
@@ -38,11 +39,12 @@ class SuggestionListView(generics.ListAPIView):
         active = self.request.query_params.get('active')
         if active == 'true':
             queryset = queryset.filter(
+                is_active=True,
                 is_acted_on=False
             )
         
         return queryset.order_by(
-            'is_acted_on', '-created_at'
+            '-is_active', 'is_acted_on', '-created_at'
         )
 
 
@@ -53,6 +55,15 @@ class SuggestionCreateView(generics.CreateAPIView):
     """
     queryset = AISuggestion.objects.all()
     serializer_class = AISuggestionSerializer
+
+
+class SuggestionGenerateView(APIView):
+    """
+    POST /api/suggestions/generate/
+    Refreshes persisted rule-based suggestions from recent store activity.
+    """
+    def post(self, request):
+        return Response(refresh_rule_suggestions())
 
 
 class SuggestionDetailView(
@@ -103,6 +114,7 @@ class SuggestionStatsView(APIView):
     def get(self, request):
         total = AISuggestion.objects.count()
         active = AISuggestion.objects.filter(
+            is_active=True,
             is_acted_on=False
         ).count()
         acted_on = AISuggestion.objects.filter(
@@ -110,14 +122,17 @@ class SuggestionStatsView(APIView):
         ).count()
         high = AISuggestion.objects.filter(
             priority='high',
+            is_active=True,
             is_acted_on=False
         ).count()
         medium = AISuggestion.objects.filter(
             priority='medium',
+            is_active=True,
             is_acted_on=False
         ).count()
         low = AISuggestion.objects.filter(
             priority='low',
+            is_active=True,
             is_acted_on=False
         ).count()
         

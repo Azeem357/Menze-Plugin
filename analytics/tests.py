@@ -89,30 +89,35 @@ class PredictionsViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    def test_returns_baseline_forecast_from_metrics(self):
+    def test_returns_baseline_forecast_from_recorded_orders(self):
         today = date.today()
-        AnalyticsMetric.objects.create(
-            metric_date=today - timedelta(days=1),
-            total_revenue=100
-        )
-        AnalyticsMetric.objects.create(
-            metric_date=today,
-            total_revenue=200
-        )
+        for days_ago in range(1, 8):
+            occurred_at = datetime.combine(
+                today - timedelta(days=days_ago),
+                time(12),
+                tzinfo=timezone.utc,
+            )
+            SessionEvent.objects.create(
+                event_type='purchase',
+                session_id=f'session-{days_ago}',
+                order_id=f'order-{days_ago}',
+                revenue=150,
+                occurred_at=occurred_at,
+            )
 
         response = self.client.get('/api/predictions/?horizon=7')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['weekly']['value'], 1050)
         self.assertEqual(response.data['monthly']['value'], 4500)
-        self.assertEqual(len(response.data['history']), 1)
-        self.assertEqual(response.data['history'][0]['variance'], 100)
-        self.assertIn('no trained ML model', response.data['model']['message'])
+        self.assertEqual(len(response.data['history']), 23)
+        self.assertIn('not a trained ML model', response.data['model']['message'])
 
     def test_returns_empty_state_when_metrics_do_not_exist(self):
         response = self.client.get('/api/predictions/')
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['model']['status'], 'offline')
         self.assertIsNone(response.data['weekly']['value'])
         self.assertEqual(response.data['history'], [])
 

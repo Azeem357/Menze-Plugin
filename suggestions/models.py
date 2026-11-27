@@ -27,12 +27,19 @@ class AISuggestion(models.Model):
     title = models.CharField(max_length=200)
     body = models.TextField()
     source = models.CharField(max_length=100)
+    rule_key = models.CharField(
+        max_length=100,
+        unique=True,
+        null=True,
+        blank=True,
+    )
     priority = models.CharField(
         max_length=10,
         choices=PRIORITY_CHOICES,
         default='medium'
     )
     is_acted_on = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     acted_on_at = models.DateTimeField(
@@ -43,6 +50,7 @@ class AISuggestion(models.Model):
     class Meta:
         db_table = 'ai_suggestions'
         ordering = [
+            '-is_active',
             'is_acted_on',
             '-created_at'
         ]

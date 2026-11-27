@@ -1,56 +1,65 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-import numpy as np
+from datetime import timedelta
+from django.db.models import Count
+from django.utils import timezone
 
-# Sales prediction endpoint
+from analytics.forecasting import build_revenue_forecast
+from analytics.models import SessionEvent
+
+
 class SalesPredictionView(APIView):
     def get(self, request):
-        try:
-            from ai_models.predict_sales import predict_next_30_days
-
-            # Get last 30 days sales from your DB
-            # For now using dummy data
-            recent_sales = list(np.random.randint(5000, 50000, 30))
-
-            predictions = predict_next_30_days(recent_sales)
-
-            return Response({
-                'predictions': predictions,
-                'days': list(range(1, 31)),
-                'label': 'Next 30 Days Sales Forecast'
-            })
-        except Exception as e:
-            return Response({'error': str(e)}, status=500)
+        forecast = build_revenue_forecast(horizon_days=30)
+        return Response({
+            'model': forecast['model'],
+            'predictions': forecast['daily_forecast'],
+            'days': list(range(1, len(forecast['daily_forecast']) + 1)),
+            'label': 'Next 30 Days Sales Baseline',
+        })
 
 
-# Product recommendation endpoint
 class RecommendationView(APIView):
     def post(self, request):
-        try:
-            import pickle
+        excluded = request.data.get('exclude_product_ids', [])
+        if not isinstance(excluded, list) or not all(
+            isinstance(product_id, (str, int)) for product_id in excluded
+        ):
+            return Response(
+                {'error': 'exclude_product_ids must be a list of product IDs'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-            data = request.data
-            category        = data.get('viewed_category', 'shirts')
-            session_duration = int(data.get('session_duration', 120))
-            pages_visited   = int(data.get('pages_visited', 3))
-            added_to_cart   = int(data.get('added_to_cart', 0))
-
-            with open('ai_models/saved_models/recommendation_model.pkl', 'rb') as f:
-                clf = pickle.load(f)
-            with open('ai_models/saved_models/label_encoders.pkl', 'rb') as f:
-                encoders = pickle.load(f)
-
-            le_cat  = encoders['category']
-            le_item = encoders['item']
-
-            cat_enc = le_cat.transform([category])[0]
-            X = [[cat_enc, session_duration, pages_visited, added_to_cart]]
-
-            pred_enc = clf.predict(X)[0]
-            recommended = le_item.inverse_transform([pred_enc])[0]
-
-            return Response({'recommended_item': recommended})
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=500)
+        start_date = timezone.localdate() - timedelta(days=30)
+        popular = (
+            SessionEvent.objects.filter(
+                event_type__in=['product_view', 'add_to_cart', 'purchase'],
+                occurred_at__date__gte=start_date,
+                product_id__isnull=False,
+            )
+            .exclude(product_id='')
+            .exclude(product_id__in=[str(value) for value in excluded])
+            .values('product_id')
+            .annotate(interactions=Count('session_id', distinct=True))
+            .order_by('-interactions', 'product_id')[:10]
+        )
+        recommendations = [
+            {
+                'product_id': item['product_id'],
+                'interactions': item['interactions'],
+            }
+            for item in popular
+        ]
+        return Response({
+            'method': 'popular_products_from_recent_store_events',
+            'recommendations': recommendations,
+            'recommended_item': (
+                recommendations[0]['product_id']
+                if recommendations else None
+            ),
+            'message': (
+                None if recommendations
+                else 'No recent product activity is available to recommend.'
+            ),
+        })

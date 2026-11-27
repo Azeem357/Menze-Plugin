@@ -5,8 +5,8 @@ from .models import AISuggestion
 class AISuggestionAdmin(admin.ModelAdmin):
     list_display = [
         'title', 'suggestion_type',
-        'priority', 'is_acted_on', 'created_at'
+        'priority', 'is_active', 'is_acted_on', 'created_at'
     ]
     list_filter = [
-        'suggestion_type', 'priority', 'is_acted_on'
+        'suggestion_type', 'priority', 'is_active', 'is_acted_on'
     ]

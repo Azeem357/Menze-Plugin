@@ -10,6 +10,7 @@ from .serializers import (
     AnalyticsMetricSerializer
 )
 from .services import MetricCalculator
+from .forecasting import build_revenue_forecast
 from .serializers import SessionEventCreateSerializer
 from django.utils.dateparse import parse_datetime
 
@@ -122,93 +123,40 @@ class PredictionsView(APIView):
                 {'error': 'horizon must be a positive integer'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        if horizon < 1:
+        if horizon < 1 or horizon > 365:
             return Response(
-                {'error': 'horizon must be a positive integer'},
+                {'error': 'horizon must be an integer from 1 to 365'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        today = date.today()
-        start_date = today - timedelta(days=30)
-        records = list(
-            AnalyticsMetric.objects.filter(
-                metric_date__gte=start_date,
-                metric_date__lte=today
-            ).order_by('metric_date').values(
-                'metric_date', 'total_revenue'
-            )
-        )
-
-        if not records:
-            return Response({
-                'model': {
-                    'status': 'offline',
-                    'title': 'Forecast unavailable',
-                    'message': 'No historical revenue metrics are available yet.'
-                },
-                'weekly': {
-                    'label': f'Next {horizon} Days Forecast',
-                    'title': 'Expected Revenue',
-                    'value': None
-                },
-                'monthly': {
-                    'label': 'Monthly Outlook',
-                    'title': 'Total Expected Revenue',
-                    'value': None,
-                    'volatility_label': 'Unavailable'
-                },
-                'history': [],
-                'insights': []
-            })
-
-        revenues = [float(record['total_revenue'] or 0) for record in records]
-        average = sum(revenues) / len(revenues)
-        variance = sum((revenue - average) ** 2 for revenue in revenues) / len(revenues)
-        standard_deviation = variance ** 0.5
-        volatility_ratio = standard_deviation / average if average else 0
-        volatility = (
-            'high' if volatility_ratio >= 0.3
-            else 'medium' if volatility_ratio >= 0.15
-            else 'low'
-        )
-
-        history = []
-        for index, record in enumerate(records):
-            if index == 0:
-                continue
-            prior_revenues = revenues[max(0, index - 7):index]
-            predicted = sum(prior_revenues) / len(prior_revenues)
-            actual = revenues[index]
-            history.append({
-                'period': record['metric_date'].isoformat(),
-                'predicted': round(predicted, 2),
-                'actual': round(actual, 2),
-                'variance': round((actual - predicted) / predicted * 100, 2)
-                if predicted else None
-            })
-
+        forecast = build_revenue_forecast(horizon)
+        has_forecast = forecast['daily_average'] is not None
         return Response({
-            'model': {
-                'status': 'active',
-                'title': 'Historical Trend Forecast',
-                'message': (
-                    f'Baseline estimates use the average of {len(records)} '
-                    'recorded daily revenue metrics; no trained ML model is configured.'
-                )
-            },
+            'model': forecast['model'],
             'weekly': {
                 'label': f'Next {horizon} Days Forecast',
                 'title': 'Expected Revenue',
-                'value': round(average * horizon, 2),
-                'note': 'Baseline estimate from recorded daily revenue.'
+                'value': (
+                    round(forecast['daily_average'] * horizon, 2)
+                    if has_forecast else None
+                ),
+                'note': (
+                    'Baseline from actual orders in the latest 7 completed '
+                    'days; not an ML forecast.'
+                    if has_forecast else None
+                ),
             },
             'monthly': {
                 'label': 'Monthly Outlook',
                 'title': 'Total Expected Revenue',
-                'value': round(average * 30, 2),
-                'volatility': volatility
+                'value': forecast['monthly_value'],
+                'volatility': forecast['volatility'],
+                'volatility_label': (
+                    'Based on the last 30 completed days'
+                    if has_forecast else 'Unavailable'
+                ),
             },
-            'history': history,
+            'history': forecast['history'],
             'insights': []
         })
 

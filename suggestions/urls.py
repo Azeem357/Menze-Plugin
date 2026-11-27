@@ -13,6 +13,11 @@ urlpatterns = [
         name='suggestion-create'
     ),
     path(
+        'suggestions/generate/',
+        views.SuggestionGenerateView.as_view(),
+        name='suggestion-generate'
+    ),
+    path(
         'suggestions/stats/',
         views.SuggestionStatsView.as_view(),
         name='suggestion-stats'
