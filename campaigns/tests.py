@@ -113,6 +113,37 @@ class CampaignPerformanceTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('utm_campaign', response.data)
 
+    def test_duplicate_platform_and_utm_campaign_is_rejected_case_insensitively(self):
+        response = self.client.post(
+            '/api/campaigns/',
+            data={
+                'platform': 'facebook',
+                'campaign_name': 'Duplicate winter sale',
+                'utm_source': 'facebook',
+                'utm_medium': 'paid_social',
+                'utm_campaign': 'WINTER-SALE',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('utm_campaign', response.data)
+
+    def test_same_utm_campaign_is_allowed_for_different_platforms(self):
+        response = self.client.post(
+            '/api/campaigns/',
+            data={
+                'platform': 'instagram',
+                'campaign_name': 'Winter sale on Instagram',
+                'utm_source': 'instagram',
+                'utm_medium': 'paid_social',
+                'utm_campaign': 'winter-sale',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+
     def test_performance_rejects_invalid_date_range(self):
         response = self.client.get('/api/campaigns/performance/?days=0')
 

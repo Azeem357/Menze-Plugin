@@ -285,21 +285,48 @@ class DashboardOverviewView(APIView):
     Custom aggregation needs APIView.
     """
     def get(self, request):
-        days = int(
-            request.query_params.get('days', 30)
-        )
-        start_date = date.today() - timedelta(days=days)
+        try:
+            days = int(request.query_params.get('days', 30))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'days must be an integer from 1 to 3650'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if days < 1 or days > 3650:
+            return Response(
+                {'error': 'days must be an integer from 1 to 3650'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days - 1)
         
         metrics = AnalyticsMetric.objects.filter(
-            metric_date__gte=start_date
+            metric_date__range=(start_date, end_date)
         ).order_by('metric_date')
+        traffic = self._get_traffic_sources(start_date, end_date)
         
         if not metrics.exists():
+            events = SessionEvent.objects.filter(
+                occurred_at__date__range=(start_date, end_date)
+            )
+            total_sessions = events.filter(
+                event_type='page_view'
+            ).values('session_id').distinct().count()
+            total_orders = sum(source['orders'] for source in traffic)
+            total_revenue = sum(source['revenue'] for source in traffic)
             return Response({
-                'message': 'No data yet',
-                'summary': {},
+                'message': 'No calculated daily metrics yet',
+                'summary': {
+                    'total_revenue': round(total_revenue, 2),
+                    'total_orders': total_orders,
+                    'total_sessions': total_sessions,
+                    'avg_conversion_rate': 0,
+                    'avg_roas': 0,
+                    'avg_cac': 0,
+                    'avg_ltv': 0,
+                },
                 'chart': [],
-                'traffic_sources': []
+                'traffic_sources': traffic,
             })
         
         # Totals using Django aggregation
@@ -331,9 +358,6 @@ class DashboardOverviewView(APIView):
             for m in metrics
         ]
         
-        # Traffic sources
-        traffic = self._get_traffic_sources(start_date)
-        
         return Response({
             'summary': {
                 'total_revenue': round(
@@ -356,22 +380,28 @@ class DashboardOverviewView(APIView):
             'traffic_sources': traffic
         })
     
-    def _get_traffic_sources(self, start_date):
+    def _get_traffic_sources(self, start_date, end_date):
         events = SessionEvent.objects.filter(
-            occurred_at__date__gte=start_date
-        )
+            occurred_at__date__range=(start_date, end_date)
+        ).order_by('occurred_at', 'id')
         
         sources = {}
+        seen_orders = set()
         for event in events:
-            source = event.utm_source or 'organic'
+            source = (event.utm_source or '').strip().lower() or 'organic'
             if source not in sources:
                 sources[source] = {
-                    'sessions': 0,
+                    'session_ids': set(),
                     'revenue': 0,
                     'orders': 0
                 }
-            sources[source]['sessions'] += 1
-            if event.event_type == 'checkout_complete':
+            if event.event_type == 'page_view':
+                sources[source]['session_ids'].add(event.session_id)
+            if event.event_type in ('purchase', 'checkout_complete'):
+                order_key = event.order_id or str(event.pk)
+                if order_key in seen_orders:
+                    continue
+                seen_orders.add(order_key)
                 sources[source]['revenue'] += (
                     event.revenue or 0
                 )
@@ -380,14 +410,13 @@ class DashboardOverviewView(APIView):
         return [
             {
                 'source': k,
-                'sessions': v['sessions'],
+                'sessions': len(v['session_ids']),
                 'revenue': round(v['revenue'], 2),
                 'orders': v['orders']
             }
             for k, v in sorted(
                 sources.items(),
-                key=lambda x: x[1]['sessions'],
-                reverse=True
+                key=lambda x: (-len(x[1]['session_ids']), x[0]),
             )
         ]
 

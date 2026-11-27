@@ -1,5 +1,6 @@
 from django.db import models
 from django.db.models import Sum
+from django.db.models.functions import Lower
 import uuid
 
 class AdCampaign(models.Model):
@@ -57,6 +58,13 @@ class AdCampaign(models.Model):
     
     class Meta:
         db_table = 'ad_campaigns'
+        constraints = [
+            models.UniqueConstraint(
+                Lower('utm_campaign'),
+                'platform',
+                name='unique_platform_utm_campaign',
+            ),
+        ]
     
     @property
     def roas(self):

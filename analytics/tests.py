@@ -151,6 +151,78 @@ class FunnelViewTests(TestCase):
         self.assertEqual(purchase_stage['count'], 2)
 
 
+class DashboardOverviewTrafficSourceTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_sources_count_unique_sessions_and_unique_orders_without_metrics(self):
+        occurred_at = datetime.combine(
+            date.today(),
+            time(12),
+            tzinfo=timezone.utc,
+        )
+        SessionEvent.objects.create(
+            event_type='page_view',
+            session_id='facebook-session',
+            utm_source='facebook',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='page_view',
+            session_id='facebook-session',
+            utm_source='facebook',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='facebook-session',
+            order_id='order-1',
+            revenue=125,
+            utm_source='facebook',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='checkout_complete',
+            session_id='facebook-session',
+            order_id='order-1',
+            revenue=125,
+            utm_source='facebook',
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='page_view',
+            session_id='organic-session',
+            occurred_at=occurred_at,
+        )
+
+        response = self.client.get('/api/dashboard/overview/?days=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['total_sessions'], 2)
+        self.assertEqual(
+            response.data['traffic_sources'],
+            [
+                {
+                    'source': 'facebook',
+                    'sessions': 1,
+                    'revenue': 125,
+                    'orders': 1,
+                },
+                {
+                    'source': 'organic',
+                    'sessions': 1,
+                    'revenue': 0,
+                    'orders': 0,
+                },
+            ],
+        )
+
+    def test_rejects_invalid_days_range(self):
+        response = self.client.get('/api/dashboard/overview/?days=0')
+
+        self.assertEqual(response.status_code, 400)
+
+
 class SyncOrdersViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
