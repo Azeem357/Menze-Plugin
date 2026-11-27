@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone as django_timezone
 from rest_framework.test import APIClient
 
 from campaigns.models import AdCampaign, CampaignDailyStat
@@ -246,11 +247,23 @@ class SyncOrdersViewTests(TestCase):
                 'order_id': 2,
                 'total': '25.00',
                 'created_at': '2026-11-22T13:57:53.013006+00:00',
+                'items': [{
+                    'product_id': 10,
+                    'product_name': 'Bestseller',
+                    'quantity': 2,
+                    'price': '12.50',
+                }],
             },
             {
                 'order_id': 2,
                 'total': '25.00',
                 'created_at': '2026-11-22T13:57:53.013006+00:00',
+                'items': [{
+                    'product_id': 10,
+                    'product_name': 'Bestseller',
+                    'quantity': 2,
+                    'price': '12.50',
+                }],
             },
         ]
         get.return_value.status_code = 200
@@ -279,6 +292,124 @@ class SyncOrdersViewTests(TestCase):
             SessionEvent.objects.filter(event_type='purchase').count(),
             2,
         )
+        self.assertEqual(
+            SessionEvent.objects.get(order_id='2').order_items,
+            [{
+                'product_id': '10',
+                'product_name': 'Bestseller',
+                'quantity': 2,
+                'price': '12.50',
+            }],
+        )
+
+    @patch('requests.get')
+    def test_sync_backfills_items_on_existing_orders(self, get):
+        get.return_value.status_code = 200
+        get.return_value.json.return_value = [{
+            'order_id': 1,
+            'total': '15.00',
+            'created_at': '2026-11-22T13:57:26.321171+00:00',
+            'items': [{
+                'product_id': 4,
+                'product_name': 'Existing order product',
+                'quantity': 3,
+                'price': '5.00',
+            }],
+        }]
+        event = SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='order-1',
+            order_id='1',
+            revenue=15.00,
+        )
+
+        response = self.client.post('/api/sync/orders/', data={}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'synced': 0, 'total': 1})
+        event.refresh_from_db()
+        self.assertEqual(event.order_items[0]['product_id'], '4')
+        self.assertEqual(event.order_items[0]['price'], '5.00')
+
+
+class ProductSalesViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_ranks_sales_by_units_and_deduplicates_order_events(self):
+        today = django_timezone.localdate()
+        occurred_at = datetime.combine(
+            today,
+            time(12),
+            tzinfo=timezone.utc,
+        )
+        items = [{
+            'product_id': 'shirt-1',
+            'product_name': 'Menze shirt',
+            'quantity': 2,
+            'price': 25.0,
+        }]
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='order-1',
+            order_id='order-1',
+            order_items=items,
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='checkout_complete',
+            session_id='order-1',
+            order_id='order-1',
+            order_items=items,
+            occurred_at=occurred_at,
+        )
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='order-2',
+            order_id='order-2',
+            order_items=[{
+                'product_id': 'hat-1',
+                'product_name': 'Menze hat',
+                'quantity': 1,
+                'price': 40.0,
+            }],
+            occurred_at=occurred_at,
+        )
+
+        response = self.client.get(
+            '/api/analytics/product-sales/?period=today'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['orders_with_items'], 2)
+        self.assertEqual(response.data['products'][0], {
+            'product_id': 'shirt-1',
+            'product_name': 'Menze shirt',
+            'units_sold': 2,
+            'revenue': 50.0,
+            'orders': 1,
+        })
+
+    def test_reports_legacy_orders_without_line_items(self):
+        SessionEvent.objects.create(
+            event_type='purchase',
+            session_id='legacy-order',
+            order_id='legacy-order',
+            occurred_at=django_timezone.now(),
+        )
+
+        response = self.client.get('/api/analytics/product-sales/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['orders_without_items'], 1)
+        self.assertEqual(response.data['products'], [])
+
+    def test_rejects_unsupported_period(self):
+        response = self.client.get(
+            '/api/analytics/product-sales/?period=month'
+        )
+
+        self.assertEqual(response.status_code, 400)
 
 
 class CalculateAllMetricsViewTests(TestCase):

@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import serializers
 from campaigns.models import AdCampaign
 from .models import (
@@ -25,8 +27,55 @@ class SessionEventCreateSerializer(serializers.ModelSerializer):
             'page_url', 'product_id', 'utm_source',
             'utm_medium', 'utm_campaign', 'referrer',
             'device_type', 'time_on_page', 'revenue',
-            'order_id', 'campaign_id', 'ad_campaign', 'occurred_at'
+            'order_id', 'order_items', 'campaign_id',
+            'ad_campaign', 'occurred_at'
         ]
+
+    def validate_order_items(self, items):
+        if not isinstance(items, list):
+            raise serializers.ValidationError('Expected a list of order items.')
+
+        normalized_items = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    f'Order item {index + 1} must be an object.'
+                )
+            try:
+                if item['product_id'] is None or item['product_name'] is None:
+                    raise ValueError
+                product_id = str(item['product_id']).strip()
+                product_name = str(item['product_name']).strip()
+                quantity_value = Decimal(str(item['quantity']))
+                if (
+                    not quantity_value.is_finite()
+                    or quantity_value != quantity_value.to_integral_value()
+                ):
+                    raise ValueError
+                quantity = int(quantity_value)
+                price = Decimal(str(item['price']))
+            except (KeyError, TypeError, ValueError, InvalidOperation):
+                raise serializers.ValidationError(
+                    f'Order item {index + 1} must include product_id, '
+                    'product_name, quantity, and price.'
+                )
+            if (
+                not product_id
+                or not product_name
+                or quantity < 1
+                or not price.is_finite()
+                or price < 0
+            ):
+                raise serializers.ValidationError(
+                    f'Order item {index + 1} has invalid product or sale data.'
+                )
+            normalized_items.append({
+                'product_id': product_id,
+                'product_name': product_name,
+                'quantity': quantity,
+                'price': str(price),
+            })
+        return normalized_items
 
     def validate(self, attrs):
         event_type = attrs.get('event_type')

@@ -93,6 +93,7 @@ class SessionEvent(models.Model):
         null=True,
         blank=True
     )
+    order_items = models.JSONField(default=list, blank=True)
     campaign_id = models.CharField(
         max_length=100,
         null=True,

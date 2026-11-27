@@ -3,6 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Sum
 from datetime import date, timedelta
+from decimal import Decimal
+from django.utils import timezone
 from .models import SessionEvent, AnalyticsMetric
 from .serializers import (
     SessionEventSerializer,
@@ -158,6 +160,86 @@ class PredictionsView(APIView):
             },
             'history': forecast['history'],
             'insights': []
+        })
+
+
+class ProductSalesView(APIView):
+    """
+    GET /api/analytics/product-sales/?period=today|7d
+    Ranks products using recorded order line items, not product views.
+    """
+    def get(self, request):
+        period = request.query_params.get('period', '7d')
+        if period not in ('today', '7d'):
+            return Response(
+                {'error': 'period must be either today or 7d'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        end_date = timezone.localdate()
+        start_date = (
+            end_date if period == 'today'
+            else end_date - timedelta(days=6)
+        )
+        events = SessionEvent.objects.filter(
+            event_type__in=('purchase', 'checkout_complete'),
+            occurred_at__date__range=(start_date, end_date),
+        ).order_by('occurred_at', 'id')
+
+        products = {}
+        seen_orders = set()
+        orders_with_items = 0
+        orders_without_items = 0
+        for event in events:
+            order_key = event.order_id or str(event.pk)
+            if order_key in seen_orders:
+                continue
+            seen_orders.add(order_key)
+            if not event.order_items:
+                orders_without_items += 1
+                continue
+
+            orders_with_items += 1
+            for item in event.order_items:
+                product_id = item['product_id']
+                product = products.setdefault(product_id, {
+                    'product_id': product_id,
+                    'product_name': item['product_name'],
+                    'units_sold': 0,
+                    'revenue': Decimal('0'),
+                    'order_ids': set(),
+                })
+                quantity = item['quantity']
+                product['units_sold'] += quantity
+                product['revenue'] += (
+                    Decimal(str(item['price'])) * quantity
+                )
+                product['order_ids'].add(order_key)
+
+        ranked_products = sorted(
+            products.values(),
+            key=lambda product: (
+                -product['units_sold'],
+                -product['revenue'],
+                product['product_name'].casefold(),
+            ),
+        )
+        return Response({
+            'period': period,
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'orders_with_items': orders_with_items,
+            'orders_without_items': orders_without_items,
+            'products': [
+                {
+                    'product_id': product['product_id'],
+                    'product_name': product['product_name'],
+                    'units_sold': product['units_sold'],
+                    'revenue': round(float(product['revenue']), 2),
+                    'orders': len(product['order_ids']),
+                }
+                for product in ranked_products
+            ],
         })
 
 
@@ -516,26 +598,23 @@ class SyncOrdersView(APIView):
             
             orders = response.json()
             count = 0
-            
-            order_ids = {
-                str(order['order_id'])
-                for order in orders
-            }
             existing_order_ids = set(
                 SessionEvent.objects.filter(
                     event_type__in=['purchase', 'checkout_complete'],
-                    order_id__in=order_ids,
                 ).values_list('order_id', flat=True)
             )
+            seen_order_ids = set()
             for order in orders:
                 order_id = str(order['order_id'])
-                if order_id in existing_order_ids:
+                if order_id in seen_order_ids:
                     continue
+                seen_order_ids.add(order_id)
                 event_data = {
                     'session_id': f"order-{order_id}",
                     'event_type': 'purchase',
                     'order_id': order_id,
                     'revenue': order['total'],
+                    'order_items': order.get('items', []),
                 }
                 for field in (
                     'user_id',
@@ -555,8 +634,9 @@ class SyncOrdersView(APIView):
                 serializer = SessionEventCreateSerializer(data=event_data)
                 serializer.is_valid(raise_exception=True)
                 serializer.save()
-                existing_order_ids.add(order_id)
-                count += 1
+                if order_id not in existing_order_ids:
+                    existing_order_ids.add(order_id)
+                    count += 1
             
             return Response({'synced': count, 'total': len(orders)})
         except req.exceptions.Timeout:

@@ -40,6 +40,11 @@ urlpatterns = [
         views.PredictionsView.as_view(),
         name='predictions'
     ),
+    path(
+        'analytics/product-sales/',
+        views.ProductSalesView.as_view(),
+        name='product-sales'
+    ),
     
     # Dashboard
     path(
